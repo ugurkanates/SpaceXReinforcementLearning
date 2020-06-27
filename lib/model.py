@@ -1,102 +1,68 @@
 import ptan
 import numpy as np
-
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
 
-HID_SIZE = 128
+HID_SIZE = 64
 
 
-class ModelA2C(nn.Module):
+class ModelActor(nn.Module):
     def __init__(self, obs_size, act_size):
-        super(ModelA2C, self).__init__()
+        super(ModelActor, self).__init__()
 
-        self.base = nn.Sequential(
-            nn.Linear(obs_size, HID_SIZE),
-            nn.ReLU(),
-        )
         self.mu = nn.Sequential(
+            nn.Linear(obs_size, HID_SIZE),
+            nn.Tanh(),
+            nn.Linear(HID_SIZE, HID_SIZE),
+            nn.Tanh(),
             nn.Linear(HID_SIZE, act_size),
             nn.Tanh(),
         )
-        self.var = nn.Sequential(
-            nn.Linear(HID_SIZE, act_size),
-            nn.Softplus(),
-        )
-        self.value = nn.Linear(HID_SIZE, 1)
+        self.logstd = nn.Parameter(torch.zeros(act_size))
 
     def forward(self, x):
-        base_out = self.base(x)
-        return self.mu(base_out), self.var(base_out), \
-               self.value(base_out)
+        return self.mu(x)
 
 
-class DDPGActor(nn.Module):
-    def __init__(self, obs_size, act_size):
-        super(DDPGActor, self).__init__()
+class ModelCritic(nn.Module):
+    def __init__(self, obs_size):
+        super(ModelCritic, self).__init__()
 
-        self.net = nn.Sequential(
-            nn.Linear(obs_size, 400),
+        self.value = nn.Sequential(
+            nn.Linear(obs_size, HID_SIZE),
             nn.ReLU(),
-            nn.Linear(400, 300),
+            nn.Linear(HID_SIZE, HID_SIZE),
             nn.ReLU(),
-            nn.Linear(300, act_size),
-            nn.Tanh()
+            nn.Linear(HID_SIZE, 1),
         )
 
     def forward(self, x):
-        return self.net(x)
+        return self.value(x)
 
 
-class DDPGCritic(nn.Module):
+class ModelSACTwinQ(nn.Module):
     def __init__(self, obs_size, act_size):
-        super(DDPGCritic, self).__init__()
+        super(ModelSACTwinQ, self).__init__()
 
-        self.obs_net = nn.Sequential(
-            nn.Linear(obs_size, 400),
+        self.q1 = nn.Sequential(
+            nn.Linear(obs_size + act_size, HID_SIZE),
             nn.ReLU(),
+            nn.Linear(HID_SIZE, HID_SIZE),
+            nn.ReLU(),
+            nn.Linear(HID_SIZE, 1),
         )
 
-        self.out_net = nn.Sequential(
-            nn.Linear(400 + act_size, 300),
+        self.q2 = nn.Sequential(
+            nn.Linear(obs_size + act_size, HID_SIZE),
             nn.ReLU(),
-            nn.Linear(300, 1)
+            nn.Linear(HID_SIZE, HID_SIZE),
+            nn.ReLU(),
+            nn.Linear(HID_SIZE, 1),
         )
 
-    def forward(self, x, a):
-        obs = self.obs_net(x)
-        return self.out_net(torch.cat([obs, a], dim=1))
-
-
-class D4PGCritic(nn.Module):
-    def __init__(self, obs_size, act_size,
-                 n_atoms, v_min, v_max):
-        super(D4PGCritic, self).__init__()
-
-        self.obs_net = nn.Sequential(
-            nn.Linear(obs_size, 400),
-            nn.ReLU(),
-        )
-
-        self.out_net = nn.Sequential(
-            nn.Linear(400 + act_size, 300),
-            nn.ReLU(),
-            nn.Linear(300, n_atoms)
-        )
-
-        delta = (v_max - v_min) / (n_atoms - 1)
-        self.register_buffer("supports", torch.arange(
-            v_min, v_max + delta, delta))
-
-    def forward(self, x, a):
-        obs = self.obs_net(x)
-        return self.out_net(torch.cat([obs, a], dim=1))
-
-    def distr_to_q(self, distr):
-        weights = F.softmax(distr, dim=1) * self.supports
-        res = weights.sum(dim=1)
-        return res.unsqueeze(dim=-1)
+    def forward(self, obs, act):
+        x = torch.cat([obs, act], dim=1)
+        return self.q1(x), self.q2(x)
 
 
 class AgentA2C(ptan.agent.BaseAgent):
@@ -108,10 +74,11 @@ class AgentA2C(ptan.agent.BaseAgent):
         states_v = ptan.agent.float32_preprocessor(states)
         states_v = states_v.to(self.device)
 
-        mu_v, var_v, _ = self.net(states_v)
+        mu_v = self.net(states_v)
         mu = mu_v.data.cpu().numpy()
-        sigma = torch.sqrt(var_v).data.cpu().numpy()
-        actions = np.random.normal(mu, sigma)
+        logstd = self.net.logstd.data.cpu().numpy()
+        rnd = np.random.normal(size=logstd.shape)
+        actions = mu + np.exp(logstd) * rnd
         actions = np.clip(actions, -1, 1)
         return actions, agent_states
 
@@ -157,23 +124,3 @@ class AgentDDPG(ptan.agent.BaseAgent):
 
         actions = np.clip(actions, -1, 1)
         return actions, new_a_states
-
-
-class AgentD4PG(ptan.agent.BaseAgent):
-    """
-    Agent implementing noisy agent
-    """
-    def __init__(self, net, device="cpu", epsilon=0.3):
-        self.net = net
-        self.device = device
-        self.epsilon = epsilon
-
-    def __call__(self, states, agent_states):
-        states_v = ptan.agent.float32_preprocessor(states)
-        states_v = states_v.to(self.device)
-        mu_v = self.net(states_v)
-        actions = mu_v.data.cpu().numpy()
-        actions += self.epsilon * np.random.normal(
-            size=actions.shape)
-        actions = np.clip(actions, -1, 1)
-        return actions, agent_states
