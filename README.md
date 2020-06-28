@@ -1,7 +1,6 @@
 # SpaceX Falcon 9 Landing with Reinforcement Learning 
 
-# ![GIF](https://thumbs.gfycat.com/CoarseEmbellishedIsopod-max-14mb.gif)
-[Click here for higher quality video](https://gfycat.com/CoarseEmbellishedIsopod)
+# ![GIF](videogifwhatever.gif)
 
 The Falcon 9, developed by aerospace company SpaceX, means it is now possible to reuse the first-stage of the rocket, by flying it safely back to Earth.
 
@@ -86,3 +85,7 @@ I already saved bunch of network models in **/rocket_saved_networks/** folder.  
 
 
 [![Everything Is AWESOME](youtube.png)](https://www.youtube.com/watch?v=z-j82WmZojY "Everything Is AWESOME")
+
+## Detailed Medium Post
+
+https://medium.com/@paypaytr/spacex-falcon-9-landing-with-rl-7dde2374eb71
